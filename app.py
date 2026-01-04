@@ -360,3 +360,10 @@ class StudyPlannerApp:
             pass
 
         self.render_sessions()
+
+
+# Main runner
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = StudyPlannerApp(root)
+    root.mainloop()
