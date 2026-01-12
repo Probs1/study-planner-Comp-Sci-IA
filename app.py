@@ -197,39 +197,212 @@ class StudyPlannerApp:
     def add_session_popup(self):
         popup = tk.Toplevel(self.root)
         popup.title("Add Study Session")
-        popup.geometry("300x350")
+        popup.geometry("450x620")
+        popup.configure(bg="#f5f5f5")
+        popup.resizable(False, False)
+        
+        # Center the popup window
+        popup.transient(self.root)
+        popup.grab_set()
+        
+        # Use grid on the toplevel so header, body, footer align reliably
+        popup.grid_rowconfigure(1, weight=1)
+        popup.grid_columnconfigure(0, weight=1)
+
+        # Header section
+        header = tk.Frame(popup, bg=self.colors["header_bg"], height=70)
+        header.grid(row=0, column=0, sticky="ew")
+        header.grid_propagate(False)
+        
+        header_label = tk.Label(
+            header,
+            text="📝 Add Study Session",
+            font=("Segoe UI", 18, "bold"),
+            bg=self.colors["header_bg"],
+            fg=self.colors["header_fg"]
+        )
+        header_label.pack(pady=20)
+        
+        # Main form container
+        form_frame = tk.Frame(popup, bg="#f5f5f5")
+        form_frame.grid(row=1, column=0, sticky="nsew", padx=30, pady=20)
 
         # --- Subject ---
-        ttk.Label(popup, text="Subject:").pack(pady=5)
-        subject_entry = ttk.Entry(popup)
-        subject_entry.pack()
+        subject_label = tk.Label(
+            form_frame,
+            text="Subject",
+            font=("Segoe UI", 11, "bold"),
+            bg="#f5f5f5",
+            fg="#2c3e50"
+        )
+        subject_label.pack(anchor="w", pady=(10, 5))
+        
+        subject_frame = tk.Frame(form_frame, bg="#ffffff", highlightbackground="#bdc3c7", highlightthickness=1)
+        subject_frame.pack(fill="x", pady=(0, 15))
+        
+        subject_entry = tk.Entry(
+            subject_frame,
+            font=("Segoe UI", 11),
+            bg="#ffffff",
+            fg="#2c3e50",
+            bd=0,
+            relief="flat"
+        )
+        subject_entry.pack(fill="x", padx=10, pady=8)
 
         # --- Day ---
-        ttk.Label(popup, text="Day:").pack(pady=5)
+        day_label = tk.Label(
+            form_frame,
+            text="Day of Week",
+            font=("Segoe UI", 11, "bold"),
+            bg="#f5f5f5",
+            fg="#2c3e50"
+        )
+        day_label.pack(anchor="w", pady=(10, 5))
+        
         selected_day = tk.StringVar()
+        day_frame = tk.Frame(form_frame, bg="#ffffff", highlightbackground="#bdc3c7", highlightthickness=1)
+        day_frame.pack(fill="x", pady=(0, 15))
+        
         day_dropdown = ttk.Combobox(
-            popup,
+            day_frame,
             textvariable=selected_day,
             values=self.days,
-            state="readonly"
+            state="readonly",
+            font=("Segoe UI", 11)
         )
-        day_dropdown.pack()
+        day_dropdown.pack(fill="x", padx=8, pady=6)
 
         # --- Start Time ---
-        ttk.Label(popup, text="Start Time (HH:MM):").pack(pady=5)
-        start_entry = ttk.Entry(popup)
-        start_entry.pack()
+        start_label = tk.Label(
+            form_frame,
+            text="Start Time (HH:MM)",
+            font=("Segoe UI", 11, "bold"),
+            bg="#f5f5f5",
+            fg="#2c3e50"
+        )
+        start_label.pack(anchor="w", pady=(10, 5))
+        
+        start_frame = tk.Frame(form_frame, bg="#ffffff", highlightbackground="#bdc3c7", highlightthickness=1)
+        start_frame.pack(fill="x", pady=(0, 15))
+        
+        start_entry = tk.Entry(
+            start_frame,
+            font=("Segoe UI", 11),
+            bg="#ffffff",
+            fg="#2c3e50",
+            bd=0,
+            relief="flat"
+        )
+        start_entry.pack(fill="x", padx=10, pady=8)
+        start_entry.insert(0, "15:30")
 
         # --- End Time ---
-        ttk.Label(popup, text="End Time (HH:MM):").pack(pady=5)
-        end_entry = ttk.Entry(popup)
-        end_entry.pack()
+        end_label = tk.Label(
+            form_frame,
+            text="End Time (HH:MM)",
+            font=("Segoe UI", 11, "bold"),
+            bg="#f5f5f5",
+            fg="#2c3e50"
+        )
+        end_label.pack(anchor="w", pady=(10, 5))
+        
+        end_frame = tk.Frame(form_frame, bg="#ffffff", highlightbackground="#bdc3c7", highlightthickness=1)
+        end_frame.pack(fill="x", pady=(0, 15))
+        
+        end_entry = tk.Entry(
+            end_frame,
+            font=("Segoe UI", 11),
+            bg="#ffffff",
+            fg="#2c3e50",
+            bd=0,
+            relief="flat"
+        )
+        end_entry.pack(fill="x", padx=10, pady=8)
+        end_entry.insert(0, "17:00")
 
         # --- Colour Selection ---
-        ttk.Label(popup, text="Color (hex):").pack(pady=5)
-        colour_entry = ttk.Entry(popup)
+        color_label = tk.Label(
+            form_frame,
+            text="Session Color",
+            font=("Segoe UI", 11, "bold"),
+            bg="#f5f5f5",
+            fg="#2c3e50"
+        )
+        color_label.pack(anchor="w", pady=(10, 5))
+        
+        # Color picker container
+        color_container = tk.Frame(form_frame, bg="#f5f5f5")
+        color_container.pack(fill="x", pady=(0, 15))
+        
+        colour_entry = tk.Entry(
+            color_container,
+            font=("Segoe UI", 11),
+            bg="#ffffff",
+            fg="#2c3e50",
+            bd=1,
+            relief="solid",
+            width=12
+        )
         colour_entry.insert(0, "#AED6F1")
-        colour_entry.pack()
+        colour_entry.pack(side="left")
+        
+        # Color preview box
+        color_preview = tk.Label(
+            color_container,
+            text="   ",
+            bg="#AED6F1",
+            width=4,
+            relief="solid",
+            bd=1
+        )
+        color_preview.pack(side="left", padx=10)
+        
+        # Update color preview when entry changes
+        def update_preview(*args):
+            try:
+                color = colour_entry.get()
+                color_preview.config(bg=color)
+            except:
+                pass
+        
+        colour_entry.bind("<KeyRelease>", update_preview)
+        
+        # Preset color buttons
+        preset_colors = [
+            "#AED6F1", "#F8B4B4", "#B4E7B4", "#F9E79F",
+            "#D7BDE2", "#FAD7A0", "#A9DFBF", "#F5CBA7"
+        ]
+        
+        preset_frame = tk.Frame(form_frame, bg="#f5f5f5")
+        preset_frame.pack(fill="x", pady=(0, 10))
+        
+        preset_label = tk.Label(
+            preset_frame,
+            text="Quick colors:",
+            font=("Segoe UI", 9),
+            bg="#f5f5f5",
+            fg="#7f8c8d"
+        )
+        preset_label.pack(side="left", padx=(0, 8))
+        
+        for color in preset_colors:
+            def make_color_setter(c):
+                return lambda: (colour_entry.delete(0, tk.END), 
+                               colour_entry.insert(0, c),
+                               color_preview.config(bg=c))
+            
+            btn = tk.Button(
+                preset_frame,
+                bg=color,
+                width=2,
+                height=1,
+                bd=1,
+                relief="solid",
+                cursor="hand2",
+                command=make_color_setter(color)
+            )
+            btn.pack(side="left", padx=2)
 
         # --- Internal function for saving ---
         def save_session():
@@ -266,7 +439,71 @@ class StudyPlannerApp:
             messagebox.showinfo("Saved", "Study session added successfully.")
             popup.destroy()
 
-        ttk.Button(popup, text="Save Session", command=save_session).pack(pady=15)
+        # Footer bar pinned to bottom for consistent buttons layout
+        footer = tk.Frame(popup, bg="#ecf0f1", highlightthickness=1, highlightbackground="#dfe6e9")
+        footer.grid(row=2, column=0, sticky="ew")
+
+        buttons = tk.Frame(footer, bg="#ecf0f1")
+        buttons.pack(fill="x", padx=20, pady=12)
+
+        # Two equal-width columns
+        buttons.grid_columnconfigure(0, weight=1)
+        buttons.grid_columnconfigure(1, weight=1)
+
+        # Save button
+        save_btn = tk.Button(
+            buttons,
+            text="✓ Save Session",
+            command=save_session,
+            font=("Segoe UI", 12, "bold"),
+            bg=self.colors["button_bg"],
+            fg="#ffffff",
+            activebackground=self.colors["button_hover"],
+            activeforeground="#ffffff",
+            bd=0,
+            padx=30,
+            pady=12,
+            cursor="hand2",
+            relief="flat"
+        )
+        save_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        # Cancel button
+        cancel_btn = tk.Button(
+            buttons,
+            text="✕ Cancel",
+            command=popup.destroy,
+            font=("Segoe UI", 12, "bold"),
+            bg="#95a5a6",
+            fg="#ffffff",
+            activebackground="#7f8c8d",
+            activeforeground="#ffffff",
+            bd=0,
+            padx=30,
+            pady=12,
+            cursor="hand2",
+            relief="flat"
+        )
+        cancel_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        
+        # Add hover effects
+        def on_save_enter(e):
+            save_btn.config(bg=self.colors["button_hover"])
+        def on_save_leave(e):
+            save_btn.config(bg=self.colors["button_bg"])
+        def on_cancel_enter(e):
+            cancel_btn.config(bg="#7f8c8d")
+        def on_cancel_leave(e):
+            cancel_btn.config(bg="#95a5a6")
+            
+        save_btn.bind("<Enter>", on_save_enter)
+        save_btn.bind("<Leave>", on_save_leave)
+        cancel_btn.bind("<Enter>", on_cancel_enter)
+        cancel_btn.bind("<Leave>", on_cancel_leave)
+        
+        # Set focus to subject entry
+        subject_entry.focus()
+
 
     # ------------------------------------------------------
     # 4. SESSION RENDERING INTO THE GRID
