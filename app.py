@@ -63,12 +63,8 @@ class StudyPlannerApp:
         # Start the reminder checking loop
         self._check_reminders()
 
-
-# (Main runner moved to bottom so the StudyPlannerApp class contains all its methods)
-
-    # ------------------------------------------------------
     # 1. HEADER SECTION
-    # ------------------------------------------------------
+
     def _create_header(self):
         header_frame = tk.Frame(self.root, bg=self.colors["header_bg"], height=80)
         header_frame.pack(fill="x")
@@ -119,10 +115,9 @@ class StudyPlannerApp:
             add_button.config(bg=self.colors["button_bg"])
         add_button.bind("<Enter>", on_enter)
         add_button.bind("<Leave>", on_leave)
-
-    # ------------------------------------------------------
+    
     # 2. CALENDAR GRID CREATION
-    # ------------------------------------------------------
+
     def _create_calendar_grid(self):
         # Wrapper for padding and background
         wrapper = tk.Frame(self.root, bg=self.colors["bg"])
@@ -190,10 +185,9 @@ class StudyPlannerApp:
                 row_frames.append(cell)
 
             self.slot_frames.append(row_frames)
-
-    # ------------------------------------------------------
+  
     # 3. ADD SESSION POPUP WINDOW
-    # ------------------------------------------------------
+
     def add_session_popup(self):
         popup = tk.Toplevel(self.root)
         popup.title("Add Study Session")
@@ -503,11 +497,9 @@ class StudyPlannerApp:
         
         # Set focus to subject entry
         subject_entry.focus()
-
-
-    # ------------------------------------------------------
+   
     # 4. SESSION RENDERING INTO THE GRID
-    # ------------------------------------------------------
+
     def render_sessions(self):
         # Clear all widgets except the internal time labels
         for row in self.slot_frames:
@@ -598,9 +590,8 @@ class StudyPlannerApp:
                     except Exception:
                         pass
 
-    # ------------------------------------------------------
     # 5. UTILITY METHODS FOR STYLING
-    # ------------------------------------------------------
+
     def _darken_color(self, hex_color: str, factor: float = 0.7) -> str:
         """Darken a hex color by a given factor."""
         try:
@@ -621,9 +612,8 @@ class StudyPlannerApp:
         except:
             return "#000000"
 
-    # ------------------------------------------------------
     # 6. DELETE / SPLIT SESSION HANDLERS
-    # ------------------------------------------------------
+
     def _show_delete_popup(self, session_id: str, slot_index: int):
         # Find the session object
         session = next((s for s in self.sessions if s.get("id") == session_id), None)
@@ -715,9 +705,8 @@ class StudyPlannerApp:
 
         self.render_sessions()
 
-    # ------------------------------------------------------
     # 7. REMINDER SYSTEM
-    # ------------------------------------------------------
+    
     def _check_reminders(self):
         """Check for upcoming sessions and send reminders at 1 hour, 30 min, and start time."""
         now = datetime.now()
