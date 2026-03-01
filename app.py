@@ -3,6 +3,7 @@ from tkinter import ttk, filedialog, simpledialog, messagebox
 import uuid
 from datetime import datetime, timedelta
 import json
+import traceback
 from pathlib import Path
 from collections import defaultdict
 
@@ -21,13 +22,15 @@ class StudyPlannerApp:
         self.root.title("Study Planner")
         self.root.configure(bg="#f5f5f5")
         self.root.geometry("1400x900")
+        self.error_log_path = Path(__file__).parent / "study_planner_errors.log"
+        self.root.report_callback_exception = self._handle_tk_exception
         self.sessions = []
         self.sent_reminders = {}
         
         self.dark_mode = False
         self.current_filter = None
         self.session_templates = self._load_templates()
-        self.study_goals = {"weekly_hours": 20}
+        self.study_goals = {"weekly_hours": 20.0}
         self.current_week_offset = 0
         self.drag_enabled = False
         self.drag_source = None
@@ -59,13 +62,163 @@ class StudyPlannerApp:
         try:
             self.sessions = storage.load_sessions()
         except Exception as exc:
-            messagebox.showerror("Load Error", f"Could not load sessions: {exc}")
+            self._show_user_error(
+                "Load Error",
+                "Your schedule file could not be loaded. A blank schedule was opened instead.",
+                exc,
+            )
             self.sessions = []
+
+        self.sessions = self._sanitize_sessions(self.sessions, show_warning=True, source="saved schedule")
 
         self.render_sessions()
         self._check_reminders()
         
         self._update_time_indicator()
+
+    def _log_exception(self, context: str, exc: Exception) -> None:
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            details = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            with open(self.error_log_path, "a", encoding="utf-8") as log_file:
+                log_file.write(f"[{timestamp}] {context}\n{details}\n")
+        except Exception:
+            pass
+
+    def _show_user_error(self, title: str, message: str, exc: Exception | None = None) -> None:
+        if exc is not None:
+            self._log_exception(title, exc)
+        try:
+            messagebox.showerror(title, message)
+        except tk.TclError:
+            pass
+
+    def _handle_tk_exception(self, exc_type, exc_value, exc_traceback):
+        error = exc_value if isinstance(exc_value, Exception) else Exception(str(exc_value))
+        self._log_exception("Unhandled UI callback error", error)
+        try:
+            messagebox.showerror(
+                "Unexpected Error",
+                "Something went wrong, but the app is still running. Please try again."
+            )
+        except tk.TclError:
+            pass
+
+    def _parse_time_to_minutes(self, time_value: str) -> int:
+        if not isinstance(time_value, str):
+            raise ValueError("Time must be text in HH:MM format.")
+
+        parts = time_value.strip().split(":")
+        if len(parts) != 2:
+            raise ValueError("Time must be in HH:MM format.")
+
+        try:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+        except ValueError as exc:
+            raise ValueError("Time must contain only numbers.") from exc
+
+        if not (0 <= hours <= 23 and 0 <= minutes <= 59):
+            raise ValueError("Time must be between 00:00 and 23:59.")
+
+        return hours * 60 + minutes
+
+    def _is_valid_color(self, color_value: str) -> bool:
+        if not isinstance(color_value, str):
+            return False
+        cleaned = color_value.strip()
+        return len(cleaned) == 7 and cleaned.startswith("#") and all(c in "0123456789abcdefABCDEF" for c in cleaned[1:])
+
+    def _normalize_session(self, session: dict) -> dict:
+        if not isinstance(session, dict):
+            raise ValueError("Session must be an object.")
+
+        subject = str(session.get("subject", "")).strip()
+        day = str(session.get("day", "")).strip()
+        start = str(session.get("start", "")).strip()
+        end = str(session.get("end", "")).strip()
+
+        if not subject:
+            raise ValueError("Session subject is required.")
+        if day not in self.days:
+            raise ValueError("Session day is invalid.")
+
+        start_minutes = self._parse_time_to_minutes(start)
+        end_minutes = self._parse_time_to_minutes(end)
+        if end_minutes <= start_minutes:
+            raise ValueError("End time must be after start time.")
+
+        color = str(session.get("color", "")).strip()
+        if not self._is_valid_color(color):
+            color = "#AED6F1"
+
+        normalized: dict[str, object] = {
+            "id": str(session.get("id") or uuid.uuid4()),
+            "subject": subject,
+            "day": day,
+            "start": f"{start_minutes // 60:02d}:{start_minutes % 60:02d}",
+            "end": f"{end_minutes // 60:02d}:{end_minutes % 60:02d}",
+            "color": color,
+            "notes": str(session.get("notes", "")).strip(),
+        }
+
+        tasks = session.get("tasks", [])
+        if isinstance(tasks, list):
+            normalized_tasks = []
+            for task in tasks:
+                if not isinstance(task, dict):
+                    continue
+                task_text = str(task.get("text", "")).strip()
+                if not task_text:
+                    continue
+                normalized_tasks.append({
+                    "text": task_text,
+                    "completed": bool(task.get("completed", False)),
+                })
+            if normalized_tasks:
+                normalized["tasks"] = normalized_tasks
+
+        return normalized
+
+    def _sanitize_sessions(self, sessions, show_warning: bool = False, source: str = "data"):
+        if not isinstance(sessions, list):
+            if show_warning:
+                messagebox.showwarning(
+                    "Schedule Reset",
+                    f"Some {source} was invalid and could not be used."
+                )
+            return []
+
+        cleaned = []
+        dropped_count = 0
+
+        for session in sessions:
+            try:
+                cleaned.append(self._normalize_session(session))
+            except Exception as exc:
+                dropped_count += 1
+                self._log_exception(f"Invalid session skipped from {source}", exc)
+
+        if show_warning and dropped_count:
+            messagebox.showwarning(
+                "Some Sessions Skipped",
+                f"{dropped_count} invalid session(s) in your {source} were skipped to keep the app stable."
+            )
+
+        return cleaned
+
+    def _safe_save_sessions(self, show_error: bool = True) -> bool:
+        try:
+            storage.save_sessions(self.sessions)
+            return True
+        except Exception as exc:
+            if show_error:
+                self._show_user_error(
+                    "Save Error",
+                    "Your changes could not be saved to disk. Please try again.",
+                    exc,
+                )
+            return False
 
     def _create_menu_bar(self):
         menubar = tk.Menu(self.root)
@@ -279,7 +432,7 @@ class StudyPlannerApp:
                     fg=self.colors["time_label_fg"]
                 )
                 time_label.place(x=4, y=3)
-                time_label.is_time_label = True
+                setattr(time_label, "is_time_label", True)
 
                 row_frames.append(cell)
 
@@ -288,35 +441,38 @@ class StudyPlannerApp:
         self.time_indicator_line = None
     
     def _update_time_indicator(self):
-        now = datetime.now()
-        today_name = now.strftime("%A")
-        
-        if self.current_week_offset == 0 and today_name in self.days:
-            current_minutes = now.hour * 60 + now.minute
-            day_index = self.days.index(today_name)
-            
-            for row_idx, (slot_start, slot_end) in enumerate(self.time_slots):
-                if slot_start <= current_minutes < slot_end:
-                    cell = self.slot_frames[row_idx][day_index]
-                    
-                    if self.time_indicator_line:
-                        try:
-                            self.time_indicator_line.destroy()
-                        except:
-                            pass
-                    
-                    progress = (current_minutes - slot_start) / (slot_end - slot_start)
-                    y_pos = int(progress * 65)
-                    
-                    self.time_indicator_line = tk.Frame(
-                        cell,
-                        bg="#e74c3c",
-                        height=3
-                    )
-                    self.time_indicator_line.place(x=0, y=y_pos, relwidth=1)
-                    break
-        
-        self.root.after(60000, self._update_time_indicator)
+        try:
+            now = datetime.now()
+            today_name = now.strftime("%A")
+
+            if self.current_week_offset == 0 and today_name in self.days:
+                current_minutes = now.hour * 60 + now.minute
+                day_index = self.days.index(today_name)
+
+                for row_idx, (slot_start, slot_end) in enumerate(self.time_slots):
+                    if slot_start <= current_minutes < slot_end:
+                        cell = self.slot_frames[row_idx][day_index]
+
+                        if self.time_indicator_line:
+                            try:
+                                self.time_indicator_line.destroy()
+                            except tk.TclError:
+                                self.time_indicator_line = None
+
+                        progress = (current_minutes - slot_start) / (slot_end - slot_start)
+                        y_pos = int(progress * 65)
+
+                        self.time_indicator_line = tk.Frame(
+                            cell,
+                            bg="#e74c3c",
+                            height=3
+                        )
+                        self.time_indicator_line.place(x=0, y=y_pos, relwidth=1)
+                        break
+        except Exception as exc:
+            self._log_exception("Time indicator update failed", exc)
+        finally:
+            self.root.after(60000, self._update_time_indicator)
   
     def add_session_popup(self, template=None):
         popup = tk.Toplevel(self.root)
@@ -487,7 +643,7 @@ class StudyPlannerApp:
             try:
                 color = colour_entry.get()
                 color_preview.config(bg=color)
-            except:
+            except tk.TclError:
                 pass
         
         colour_entry.bind("<KeyRelease>", update_preview)
@@ -603,12 +759,31 @@ class StudyPlannerApp:
 
         # --- Internal function for saving ---
         def save_session():
-            subject = subject_entry.get()
+            subject = subject_entry.get().strip()
             day = selected_day.get()
-            start = start_entry.get()
-            end = end_entry.get()
-            colour = colour_entry.get()
+            start = start_entry.get().strip()
+            end = end_entry.get().strip()
+            colour = colour_entry.get().strip()
             notes = notes_text.get("1.0", "end-1c").strip()
+
+            if not subject:
+                messagebox.showerror("Missing Subject", "Please enter a subject name.")
+                return
+
+            try:
+                self._parse_time_to_minutes(start)
+                self._parse_time_to_minutes(end)
+                self._normalize_session({
+                    "subject": subject,
+                    "day": self.days[0],
+                    "start": start,
+                    "end": end,
+                    "color": colour,
+                    "notes": notes,
+                })
+            except ValueError as exc:
+                messagebox.showerror("Invalid Time", str(exc))
+                return
 
             # Determine which days to create sessions for
             days_to_create = []
@@ -619,7 +794,7 @@ class StudyPlannerApp:
                     return
             else:
                 # Field validation
-                if not (subject and day and start and end):
+                if not day:
                     messagebox.showerror("Error", "Please complete all fields.")
                     return
                 days_to_create = [day]
@@ -632,24 +807,30 @@ class StudyPlannerApp:
                 if not messagebox.askyesno("Conflict Warning", conflict_msg):
                     return
 
+            previous_sessions = list(self.sessions)
+
             # Create sessions for each selected day
             for target_day in days_to_create:
-                new_session = {
-                    "subject": subject,
-                    "day": target_day,
-                    "start": start,
-                    "end": end,
-                    "color": colour,
-                    "notes": notes,
-                    "id": str(uuid.uuid4())
-                }
-                self.sessions.append(new_session)
+                try:
+                    new_session = self._normalize_session({
+                        "subject": subject,
+                        "day": target_day,
+                        "start": start,
+                        "end": end,
+                        "color": colour,
+                        "notes": notes,
+                        "id": str(uuid.uuid4())
+                    })
+                    self.sessions.append(new_session)
+                except ValueError as exc:
+                    self.sessions = previous_sessions
+                    messagebox.showerror("Invalid Session", str(exc))
+                    return
 
             # Save session to disk
-            try:
-                storage.save_sessions(self.sessions)
-            except Exception as exc:
-                messagebox.showerror("Save Error", f"Could not save sessions: {exc}")
+            if not self._safe_save_sessions(show_error=True):
+                self.sessions = previous_sessions
+                return
 
             # Update calendar immediately
             self.render_sessions()
@@ -739,25 +920,18 @@ class StudyPlannerApp:
         # Place each valid session onto the calendar
         for session in sessions_to_render:
             try:
-                day_index = self.days.index(session.get("day"))
-            except ValueError:
-                continue  # Skip invalid day strings
-
-            # Convert times to minutes
-            try:
-                sh, sm = map(int, session.get("start", "00:00").split(":"))
-                eh, em = map(int, session.get("end", "00:00").split(":"))
-            except Exception:
+                normalized_session = self._normalize_session(session)
+                day_index = self.days.index(str(normalized_session["day"]))
+                start_minutes = self._parse_time_to_minutes(str(normalized_session["start"]))
+                end_minutes = self._parse_time_to_minutes(str(normalized_session["end"]))
+            except (ValueError, TypeError):
                 continue
-
-            start_minutes = sh * 60 + sm
-            end_minutes = eh * 60 + em
 
             # Check session-slot overlap and render
             for slot_index, (slot_start, slot_end) in enumerate(self.time_slots):
                 if start_minutes < slot_end and end_minutes > slot_start:
                     parent_cell = self.slot_frames[slot_index][day_index]
-                    colour = session.get("color", "#AED6F1")
+                    colour = normalized_session.get("color", "#AED6F1")
 
                     # Create event frame with rounded appearance
                     event_frame = tk.Frame(
@@ -770,7 +944,7 @@ class StudyPlannerApp:
 
                     subject_label = tk.Label(
                         event_frame,
-                        text=session.get("subject", ""),
+                        text=normalized_session.get("subject", ""),
                         bg=colour,
                         fg=self._get_contrast_color(colour),
                         font=("Segoe UI", 10, "bold"),
@@ -778,8 +952,9 @@ class StudyPlannerApp:
                     )
                     subject_label.pack(expand=True, fill="both", padx=5, pady=2)
                     # Attach metadata for callbacks
-                    event_frame.session_id = session.get("id")
-                    event_frame.slot_index = slot_index
+                    session_id = str(normalized_session["id"])
+                    setattr(event_frame, "session_id", session_id)
+                    setattr(event_frame, "slot_index", slot_index)
 
                     # Bind right-click to menu and double-click to edit directly
                     def make_edit_handler(sid):
@@ -788,10 +963,10 @@ class StudyPlannerApp:
                     def make_menu_handler(sid, sidx):
                         return lambda e: self._show_delete_popup(sid, sidx)
 
-                    event_frame.bind("<Button-3>", make_menu_handler(session.get("id"), slot_index))
-                    event_frame.bind("<Double-Button-1>", make_edit_handler(session.get("id")))
-                    subject_label.bind("<Button-3>", make_menu_handler(session.get("id"), slot_index))
-                    subject_label.bind("<Double-Button-1>", make_edit_handler(session.get("id")))
+                    event_frame.bind("<Button-3>", make_menu_handler(session_id, slot_index))
+                    event_frame.bind("<Double-Button-1>", make_edit_handler(session_id))
+                    subject_label.bind("<Button-3>", make_menu_handler(session_id, slot_index))
+                    subject_label.bind("<Double-Button-1>", make_edit_handler(session_id))
                     
                     # Add hover effect
                     def on_hover_enter(e, frame=event_frame):
@@ -814,30 +989,28 @@ class StudyPlannerApp:
                             font=("Segoe UI", 10, "bold"),
                             activebackground=self._darken_color(colour),
                             cursor="hand2",
-                            command=lambda sid=session.get("id"), sidx=slot_index: self._show_delete_popup(sid, sidx)
+                            command=lambda sid=session_id, sidx=slot_index: self._show_delete_popup(sid, sidx)
                         )
                         del_btn.place(relx=0.85, rely=0.02, relwidth=0.13, relheight=0.20)
-                    except Exception:
-                        pass
+                    except tk.TclError as exc:
+                        self._log_exception("Failed to create session options button", exc)
 
     def _darken_color(self, hex_color: str, factor: float = 0.7) -> str:
-        """Darken a hex color by a given factor."""
         try:
             hex_color = hex_color.lstrip('#')
             r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
             r, g, b = int(r * factor), int(g * factor), int(b * factor)
             return f"#{r:02x}{g:02x}{b:02x}"
-        except:
+        except (AttributeError, ValueError):
             return "#2c3e50"
     
     def _get_contrast_color(self, hex_color: str) -> str:
-        """Return black or white text color based on background brightness."""
         try:
             hex_color = hex_color.lstrip('#')
             r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
             brightness = (r * 299 + g * 587 + b * 114) / 1000
             return "#000000" if brightness > 128 else "#ffffff"
-        except:
+        except (AttributeError, ValueError):
             return "#000000"
 
     def _show_delete_popup(self, session_id: str, slot_index: int):
@@ -889,11 +1062,11 @@ class StudyPlannerApp:
                  width=25, pady=8).pack(pady=3)
 
     def _remove_session(self, session_id: str):
+        previous_sessions = list(self.sessions)
         self.sessions = [s for s in self.sessions if s.get("id") != session_id]
-        try:
-            storage.save_sessions(self.sessions)
-        except Exception:
-            pass
+        if not self._safe_save_sessions(show_error=True):
+            self.sessions = previous_sessions
+            return
         self.render_sessions()
 
     def _remove_block_from_session(self, session_id: str, slot_index: int):
@@ -902,13 +1075,10 @@ class StudyPlannerApp:
             return
 
         try:
-            sh, sm = map(int, session.get("start", "00:00").split(":"))
-            eh, em = map(int, session.get("end", "00:00").split(":"))
-        except Exception:
+            s_min = self._parse_time_to_minutes(session.get("start", "00:00"))
+            e_min = self._parse_time_to_minutes(session.get("end", "00:00"))
+        except ValueError:
             return
-
-        s_min = sh * 60 + sm
-        e_min = eh * 60 + em
 
         block_start, block_end = self.time_slots[slot_index]
 
@@ -941,65 +1111,55 @@ class StudyPlannerApp:
             })
 
         # Replace original session with new parts (if any)
+        previous_sessions = list(self.sessions)
         self.sessions = [s for s in self.sessions if s.get("id") != session_id]
         self.sessions.extend(new_sessions)
 
-        try:
-            storage.save_sessions(self.sessions)
-        except Exception:
-            pass
+        if not self._safe_save_sessions(show_error=True):
+            self.sessions = previous_sessions
+            return
 
         self.render_sessions()
 
     def _check_reminders(self):
-        """Check for upcoming sessions and send reminders at 1 hour, 30 min, and start time."""
-        now = datetime.now()
-        current_day = now.strftime("%A")  # e.g., "Monday"
-        current_time_minutes = now.hour * 60 + now.minute
-        
-        for session in self.sessions:
-            session_id = session.get("id")
-            session_day = session.get("day")
-            
-            # Only check sessions for today
-            if session_day != current_day:
-                continue
-            
-            # Parse session start time
-            try:
-                start_time = session.get("start", "00:00")
-                sh, sm = map(int, start_time.split(":"))
-                session_start_minutes = sh * 60 + sm
-            except Exception:
-                continue
-            
-            # Calculate time until session starts (in minutes)
-            time_until = session_start_minutes - current_time_minutes
-            
-            # Initialize reminder tracking for this session if needed
-            if session_id not in self.sent_reminders:
-                self.sent_reminders[session_id] = set()
-            
-            # Check for 60-minute reminder
-            if 59 <= time_until <= 61 and '60min' not in self.sent_reminders[session_id]:
-                self._send_reminder(session, "1 hour")
-                self.sent_reminders[session_id].add('60min')
-            
-            # Check for 30-minute reminder
-            elif 29 <= time_until <= 31 and '30min' not in self.sent_reminders[session_id]:
-                self._send_reminder(session, "30 minutes")
-                self.sent_reminders[session_id].add('30min')
-            
-            # Check for start time reminder
-            elif 0 <= time_until <= 1 and '0min' not in self.sent_reminders[session_id]:
-                self._send_reminder(session, "now")
-                self.sent_reminders[session_id].add('0min')
-        
-        # Check again in 60 seconds (1 minute)
-        self.root.after(60000, self._check_reminders)
+        # Check for upcoming sessions and send reminders at 1 hour, 30 min, and start time.
+        try:
+            now = datetime.now()
+            current_day = now.strftime("%A")
+            current_time_minutes = now.hour * 60 + now.minute
+
+            for session in self.sessions:
+                try:
+                    normalized_session = self._normalize_session(session)
+                except ValueError:
+                    continue
+
+                session_id = normalized_session.get("id")
+                if normalized_session.get("day") != current_day:
+                    continue
+
+                session_start_minutes = self._parse_time_to_minutes(normalized_session.get("start", "00:00"))
+                time_until = session_start_minutes - current_time_minutes
+
+                if session_id not in self.sent_reminders:
+                    self.sent_reminders[session_id] = set()
+
+                if 59 <= time_until <= 61 and '60min' not in self.sent_reminders[session_id]:
+                    self._send_reminder(normalized_session, "1 hour")
+                    self.sent_reminders[session_id].add('60min')
+                elif 29 <= time_until <= 31 and '30min' not in self.sent_reminders[session_id]:
+                    self._send_reminder(normalized_session, "30 minutes")
+                    self.sent_reminders[session_id].add('30min')
+                elif 0 <= time_until <= 1 and '0min' not in self.sent_reminders[session_id]:
+                    self._send_reminder(normalized_session, "now")
+                    self.sent_reminders[session_id].add('0min')
+        except Exception as exc:
+            self._log_exception("Reminder check failed", exc)
+        finally:
+            self.root.after(60000, self._check_reminders)
     
     def _send_reminder(self, session, time_label):
-        """Display a reminder notification for a session."""
+        # Display a reminder notification for a session.
         subject = session.get("subject", "Unknown")
         start = session.get("start", "")
         end = session.get("end", "")
@@ -1011,10 +1171,13 @@ class StudyPlannerApp:
             message = f"Your {subject} session starts in {time_label}.\n\nTime: {start} - {end}"
             title = f"Reminder: {time_label} until session"
         
-        messagebox.showinfo(title, message)
+        try:
+            messagebox.showinfo(title, message)
+        except tk.TclError as exc:
+            self._log_exception("Reminder dialog failed", exc)
     
     def edit_session_popup(self, session_id: str):
-        """Open popup to edit an existing session."""
+        # Open popup to edit an existing session.
         session = next((s for s in self.sessions if s.get("id") == session_id), None)
         if session is None:
             messagebox.showerror("Error", "Session not found.")
@@ -1094,7 +1257,7 @@ class StudyPlannerApp:
         def update_preview(*args):
             try:
                 color_preview.config(bg=colour_entry.get())
-            except:
+            except tk.TclError:
                 pass
         colour_entry.bind("<KeyRelease>", update_preview)
 
@@ -1107,25 +1270,40 @@ class StudyPlannerApp:
         notes_text.pack(fill="both", padx=10, pady=8)
 
         def save_changes():
-            # Update session
-            session["subject"] = subject_entry.get()
-            session["day"] = day_var.get()
-            session["start"] = start_entry.get()
-            session["end"] = end_entry.get()
-            session["color"] = colour_entry.get()
-            session["notes"] = notes_text.get("1.0", "end-1c").strip()
-            
-            if not (session["subject"] and session["day"] and session["start"] and session["end"]):
+            candidate = {
+                "id": session.get("id"),
+                "subject": subject_entry.get().strip(),
+                "day": day_var.get().strip(),
+                "start": start_entry.get().strip(),
+                "end": end_entry.get().strip(),
+                "color": colour_entry.get().strip(),
+                "notes": notes_text.get("1.0", "end-1c").strip(),
+                "tasks": session.get("tasks", []),
+            }
+
+            if not (candidate["subject"] and candidate["day"] and candidate["start"] and candidate["end"]):
                 messagebox.showerror("Error", "Please complete all required fields.")
                 return
-            
+
+            try:
+                normalized = self._normalize_session(candidate)
+            except ValueError as exc:
+                messagebox.showerror("Invalid Session", str(exc))
+                return
+
+            previous_session = dict(session)
+            session.clear()
+            session.update(normalized)
+
             try:
                 storage.save_sessions(self.sessions)
                 self.render_sessions()
                 messagebox.showinfo("Saved", "Session updated successfully.")
                 popup.destroy()
             except Exception as exc:
-                messagebox.showerror("Save Error", f"Could not save: {exc}")
+                session.clear()
+                session.update(previous_session)
+                self._show_user_error("Save Error", "Could not save your changes.", exc)
 
         # Footer
         footer = tk.Frame(popup, bg="#ecf0f1", highlightthickness=1, highlightbackground="#dfe6e9")
@@ -1144,13 +1322,10 @@ class StudyPlannerApp:
         cancel_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0))
     
     def _check_time_conflicts(self, days, start_str, end_str, exclude_id=None):
-        """Check if new session conflicts with existing sessions. Returns list of conflict messages."""
         try:
-            sh, sm = map(int, start_str.split(":"))
-            eh, em = map(int, end_str.split(":"))
-            new_start = sh * 60 + sm
-            new_end = eh * 60 + em
-        except:
+            new_start = self._parse_time_to_minutes(start_str)
+            new_end = self._parse_time_to_minutes(end_str)
+        except ValueError:
             return []
         
         conflicts = []
@@ -1161,11 +1336,9 @@ class StudyPlannerApp:
                 continue
             
             try:
-                s_sh, s_sm = map(int, session.get("start", "00:00").split(":"))
-                s_eh, s_em = map(int, session.get("end", "00:00").split(":"))
-                existing_start = s_sh * 60 + s_sm
-                existing_end = s_eh * 60 + s_em
-            except:
+                existing_start = self._parse_time_to_minutes(session.get("start", "00:00"))
+                existing_end = self._parse_time_to_minutes(session.get("end", "00:00"))
+            except ValueError:
                 continue
             
             # Check overlap
@@ -1178,7 +1351,7 @@ class StudyPlannerApp:
         return conflicts
     
     def _show_filter_dialog(self):
-        """Show dialog to filter sessions by subject."""
+        # Show dialog to filter sessions by subject.
         subjects = sorted(set(s.get("subject", "") for s in self.sessions if s.get("subject")))
         if not subjects:
             messagebox.showinfo("No Subjects", "No sessions to filter.")
@@ -1212,13 +1385,13 @@ class StudyPlannerApp:
                  font=("Segoe UI", 10)).pack(pady=5)
     
     def _clear_filter(self):
-        """Clear the current subject filter."""
+        # Clear the current subject filter.
         self.current_filter = None
         self.filter_label.config(text="(All subjects)")
         self.render_sessions()
     
     def _show_statistics(self):
-        """Display statistics about study sessions."""
+        # Display statistics about study sessions.
         stats_window = tk.Toplevel(self.root)
         stats_window.title("Study Statistics")
         stats_window.geometry("600x700")
@@ -1245,14 +1418,14 @@ class StudyPlannerApp:
         
         for session in self.sessions:
             try:
-                sh, sm = map(int, session.get("start", "00:00").split(":"))
-                eh, em = map(int, session.get("end", "00:00").split(":"))
-                duration = (eh * 60 + em) - (sh * 60 + sm)
+                start_minutes = self._parse_time_to_minutes(session.get("start", "00:00"))
+                end_minutes = self._parse_time_to_minutes(session.get("end", "00:00"))
+                duration = end_minutes - start_minutes
                 if duration > 0:
                     total_minutes += duration
                     subject_minutes[session.get("subject", "Unknown")] += duration
                     day_minutes[session.get("day", "Unknown")] += duration
-            except:
+            except ValueError:
                 continue
         
         total_hours = total_minutes / 60
@@ -1309,7 +1482,7 @@ class StudyPlannerApp:
                  padx=30, pady=10).pack(pady=10)
     
     def _toggle_dark_mode(self):
-        """Toggle between light and dark color schemes."""
+        # Toggle between light and dark color schemes.
         self.dark_mode = not self.dark_mode
         
         if self.dark_mode:
@@ -1343,7 +1516,7 @@ class StudyPlannerApp:
         messagebox.showinfo("Dark Mode", "Please restart the app to see full dark mode changes.\n(Dynamic switching requires UI rebuild)")
     
     def _change_week(self, offset):
-        """Change which week is being displayed."""
+        # Change which week is being displayed.
         if offset == 0:
             self.current_week_offset = 0
         else:
@@ -1360,25 +1533,31 @@ class StudyPlannerApp:
         self.render_sessions()
     
     def _load_templates(self):
-        """Load session templates from file."""
+        # Load session templates from file.
         template_file = Path(__file__).parent / "session_templates.json"
         try:
-            with open(template_file, "r") as f:
-                return json.load(f)
-        except:
+            with open(template_file, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, list):
+                return [item for item in loaded if isinstance(item, dict)]
+            return []
+        except FileNotFoundError:
+            return []
+        except Exception as exc:
+            self._log_exception("Template load failed", exc)
             return []
     
     def _save_templates(self):
-        """Save session templates to file."""
+        # Save session templates to file.
         template_file = Path(__file__).parent / "session_templates.json"
         try:
-            with open(template_file, "w") as f:
+            with open(template_file, "w", encoding="utf-8") as f:
                 json.dump(self.session_templates, f, indent=2)
         except Exception as e:
-            messagebox.showerror("Error", f"Could not save templates: {e}")
+            self._show_user_error("Template Error", "Could not save templates.", e)
     
     def _manage_templates(self):
-        """Dialog for managing session templates."""
+        # Dialog for managing session templates.
         dialog = tk.Toplevel(self.root)
         dialog.title("Session Templates")
         dialog.geometry("500x400")
@@ -1425,7 +1604,7 @@ class StudyPlannerApp:
                  padx=15, pady=5).pack(side="left", padx=5)
     
     def _manage_goals(self):
-        """Dialog for setting study goals."""
+        # Dialog for setting study goals.
         dialog = tk.Toplevel(self.root)
         dialog.title("Study Goals")
         dialog.geometry("400x250")
@@ -1451,53 +1630,66 @@ class StudyPlannerApp:
                 self.study_goals["weekly_hours"] = hours
                 messagebox.showinfo("Saved", "Study goals updated successfully!")
                 dialog.destroy()
-            except:
+            except (TypeError, ValueError):
                 messagebox.showerror("Error", "Please enter a valid positive number.")
         
         tk.Button(dialog, text="Save Goals", command=save_goals, font=("Segoe UI", 11, "bold"),
                  bg=self.colors["button_bg"], fg="#ffffff", padx=30, pady=10).pack(pady=10)
     
     def _export_json(self):
-        """Export sessions to JSON file."""
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            title="Export Sessions"
-        )
-        if file_path:
-            try:
-                with open(file_path, "w") as f:
-                    json.dump(self.sessions, f, indent=2)
+        # Export sessions to JSON file.
+        try:
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Export Sessions"
+            )
+            if file_path:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    json.dump(self._sanitize_sessions(self.sessions), f, indent=2)
                 messagebox.showinfo("Export Successful", f"Sessions exported to {file_path}")
-            except Exception as e:
-                messagebox.showerror("Export Error", f"Could not export: {e}")
+        except Exception as exc:
+            self._show_user_error("Export Error", "Could not export your schedule.", exc)
     
     def _import_json(self):
-        """Import sessions from JSON file."""
-        file_path = filedialog.askopenfilename(
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-            title="Import Sessions"
-        )
-        if file_path:
-            try:
-                with open(file_path, "r") as f:
-                    imported = json.load(f)
-                if isinstance(imported, list):
-                    # Add to existing sessions
-                    for session in imported:
-                        if "id" not in session:
-                            session["id"] = str(uuid.uuid4())
-                    self.sessions.extend(imported)
-                    storage.save_sessions(self.sessions)
-                    self.render_sessions()
-                    messagebox.showinfo("Import Successful", f"Imported {len(imported)} sessions")
-                else:
-                    messagebox.showerror("Import Error", "File format invalid")
-            except Exception as e:
-                messagebox.showerror("Import Error", f"Could not import: {e}")
+        # Import sessions from JSON file.
+        try:
+            file_path = filedialog.askopenfilename(
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Import Sessions"
+            )
+            if not file_path:
+                return
+
+            with open(file_path, "r", encoding="utf-8") as f:
+                imported = json.load(f)
+
+            if not isinstance(imported, list):
+                messagebox.showerror("Import Error", "This file does not contain a valid session list.")
+                return
+
+            cleaned_import = self._sanitize_sessions(imported, source="import file")
+            skipped = len(imported) - len(cleaned_import)
+            if not cleaned_import:
+                messagebox.showerror("Import Error", "No valid sessions were found in that file.")
+                return
+
+            previous_sessions = list(self.sessions)
+            self.sessions.extend(cleaned_import)
+            if not self._safe_save_sessions(show_error=True):
+                self.sessions = previous_sessions
+                return
+
+            self.render_sessions()
+            summary = f"Imported {len(cleaned_import)} session(s)."
+            if skipped:
+                summary += f" Skipped {skipped} invalid session(s)."
+            messagebox.showinfo("Import Successful", summary)
+        except Exception as exc:
+            self._show_user_error("Import Error", "Could not import sessions from that file.", exc)
     
     def _break_reminder_settings(self):
-        """Dialog for break reminder configuration."""
+        # Dialog for break reminder configuration.
         dialog = tk.Toplevel(self.root)
         dialog.title("Break Reminder Settings")
         dialog.geometry("450x300")
@@ -1527,7 +1719,7 @@ class StudyPlannerApp:
                  fg="#ffffff", padx=30, pady=10).pack(pady=15)
     
     def _show_shortcuts(self):
-        """Display keyboard shortcuts help."""
+        # Display keyboard shortcuts help.
         dialog = tk.Toplevel(self.root)
         dialog.title("Keyboard Shortcuts")
         dialog.geometry("450x500")
@@ -1560,7 +1752,7 @@ class StudyPlannerApp:
                  padx=30, pady=8).pack(pady=10)
     
     def _show_about(self):
-        """Display about dialog."""
+        # Display about dialog.
         messagebox.showinfo(
             "About Study Planner",
             "📚 Weekly Study Planner v2.0\n\n"
@@ -1576,11 +1768,11 @@ class StudyPlannerApp:
         )
     
     def _delete_selected_session(self):
-        """Delete currently selected/focused session (placeholder for future selection feature)."""
+        # Delete currently selected/focused session (placeholder for future selection feature).
         messagebox.showinfo("Delete Session", "Right-click or double-click a session on the calendar to delete or edit it.")
     
     def _manage_session_tasks(self, session_id: str):
-        """Manage tasks/checklist for a specific session."""
+        # Manage tasks/checklist for a specific session.
         session = next((s for s in self.sessions if s.get("id") == session_id), None)
         if session is None:
             messagebox.showerror("Error", "Session not found.")
@@ -1689,18 +1881,12 @@ class StudyPlannerApp:
         
         def toggle_task(idx, var):
             session["tasks"][idx]["completed"] = var.get()
-            try:
-                storage.save_sessions(self.sessions)
-            except:
-                pass
+            self._safe_save_sessions(show_error=True)
         
         def delete_task(idx):
             if messagebox.askyesno("Delete Task", "Remove this task?"):
                 session["tasks"].pop(idx)
-                try:
-                    storage.save_sessions(self.sessions)
-                except:
-                    pass
+                self._safe_save_sessions(show_error=True)
                 render_tasks()
         
         def add_task():
@@ -1710,10 +1896,7 @@ class StudyPlannerApp:
                     "text": task_text,
                     "completed": False
                 })
-                try:
-                    storage.save_sessions(self.sessions)
-                except:
-                    pass
+                self._safe_save_sessions(show_error=True)
                 render_tasks()
         
         render_tasks()
@@ -1743,7 +1926,7 @@ class StudyPlannerApp:
         ).pack(pady=5)
     
     def _show_archive(self):
-        """Show archived/past sessions."""
+        # Show archived/past sessions.
         # Filter sessions that are in the past (for simplicity, show all sessions with date/week info)
         dialog = tk.Toplevel(self.root)
         dialog.title("Session History")
@@ -1803,11 +1986,11 @@ class StudyPlannerApp:
         # Populate with sessions
         for session in sorted(self.sessions, key=lambda s: (s.get("day", ""), s.get("start", ""))):
             try:
-                sh, sm = map(int, session.get("start", "00:00").split(":"))
-                eh, em = map(int, session.get("end", "00:00").split(":"))
-                duration_mins = (eh * 60 + em) - (sh * 60 + sm)
+                start_minutes = self._parse_time_to_minutes(session.get("start", "00:00"))
+                end_minutes = self._parse_time_to_minutes(session.get("end", "00:00"))
+                duration_mins = end_minutes - start_minutes
                 duration_str = f"{duration_mins // 60}h {duration_mins % 60}m"
-            except:
+            except ValueError:
                 duration_str = "N/A"
             
             notes = session.get("notes", "")[:50] + ("..." if len(session.get("notes", "")) > 50 else "")
@@ -1858,7 +2041,7 @@ class StudyPlannerApp:
         ).pack(side="left", padx=5)
     
     def _toggle_drag_drop(self):
-        """Toggle drag-and-drop functionality."""
+        # Toggle drag-and-drop functionality.
         self.drag_enabled = not self.drag_enabled
         status = "enabled" if self.drag_enabled else "disabled"
         messagebox.showinfo(
@@ -1872,7 +2055,7 @@ class StudyPlannerApp:
             self._setup_drag_bindings()
     
     def _setup_drag_bindings(self):
-        """Setup drag and drop event bindings (simplified version)."""
+        # Setup drag and drop event bindings (simplified version).
         # This is a placeholder for full drag-and-drop implementation
         # Full implementation would require tracking mouse events and updating position
         messagebox.showinfo(
@@ -1882,6 +2065,13 @@ class StudyPlannerApp:
             "For advanced drag-and-drop, consider using a canvas-based calendar."
         )
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = StudyPlannerApp(root)
-    root.mainloop()
+    root = None
+    try:
+        root = tk.Tk()
+        StudyPlannerApp(root)
+        root.mainloop()
+    except Exception as exc:
+        if root is None:
+            root = tk.Tk()
+            root.withdraw()
+        messagebox.showerror("Startup Error", f"The app could not start correctly.\n\nError: {exc}")

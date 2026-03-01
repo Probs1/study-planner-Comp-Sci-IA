@@ -1,10 +1,3 @@
-"""Convenience script to start the Study Planner when run directly.
-
-Usage:
-    python run_app.py
-
-This uses package imports so it works from the project directory.
-"""
 
 from __future__ import annotations
 
@@ -24,12 +17,23 @@ except Exception:
 
     from app import StudyPlannerApp
 import tkinter as tk
+from tkinter import messagebox
 
 
 def main():
-    root = tk.Tk()
-    app = StudyPlannerApp(root)
-    root.mainloop()
+    root = None
+    try:
+        root = tk.Tk()
+        StudyPlannerApp(root)
+        root.mainloop()
+    except Exception as exc:
+        if root is None:
+            root = tk.Tk()
+            root.withdraw()
+        messagebox.showerror(
+            "Startup Error",
+            f"The app could not start correctly.\n\nError: {exc}"
+        )
 
 
 if __name__ == "__main__":
