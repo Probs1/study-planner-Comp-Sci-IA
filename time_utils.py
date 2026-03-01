@@ -1,10 +1,9 @@
-"""Time-related utilities used by the Study Planner app."""
+"""Time utilities for the Study Planner."""
 
 from typing import List, Tuple
 
 
 def format_min(total_minutes: int) -> str:
-    """Converts minutes since midnight into 'HH:MM' format."""
     hours = total_minutes // 60
     minutes = total_minutes % 60
     return f"{hours:02d}:{minutes:02d}"

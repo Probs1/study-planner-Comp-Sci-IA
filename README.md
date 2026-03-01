@@ -1,53 +1,122 @@
-# Study Planner — Quick start (Windows)
+# 📚 Weekly Study Planner
 
-This repository contains a small Tkinter-based Study Planner GUI. These steps make it easy to get started on Windows (PowerShell/CMD).
+A comprehensive desktop app for organizing and tracking your study sessions. Built with Python and Tkinter.
 
-## Recommended: use the included venv
+## Features
 
-1. Create a virtual environment (if you don't have one yet):
+- **Session Management**: Create, edit, and delete study sessions with custom colors
+- **Recurring Events**: Schedule sessions across multiple days at once
+- **Task Lists**: Add and track tasks for each study session
+- **Statistics Dashboard**: Visualize your study time and progress towards goals
+- **Smart Reminders**: Get notified 60min, 30min, and at session start
+- **Time Conflict Detection**: Avoid double-booking your study time
+- **Filter & Search**: Filter calendar by subject
+- **Multi-Week View**: Plan ahead with week navigation
+- **Dark Mode**: Easy on the eyes for night studying
+- **Export/Import**: Backup and share your schedules as JSON
 
-```powershell
-cd C:\workspace\study_planner
-python -m venv .venv
-. .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+## Quick Start
+
+### Requirements
+
+- Python 3.10+
+- No external dependencies (uses built-in tkinter)
+
+### Running the App
+
+```python
+python app.py
 ```
 
-2. Run the app using the package entrypoint (works reliably):
+Or if you have the package structure:
 
-```powershell
-python -m study_planner
+```python
+python run_app.py
 ```
 
-or run the helper script while inside the package directory:
+### First Time Setup
 
-```powershell
-.\run.ps1
+1. Clone the repository
+2. Navigate to the project directory
+3. Run the app - that's it!
+
+Your sessions are automatically saved to `sessions.json`.
+
+## How to Use
+
+### Adding a Session
+
+1. Click "➕ Add Session" or press `Ctrl+N`
+2. Fill in subject, day, times, and optional notes
+3. Choose a color to color-code your subjects
+4. For recurring sessions, check the box and select multiple days
+
+### Editing Sessions
+
+- **Double-click** any session to edit it
+- **Right-click** to open context menu with more options
+
+### Managing Tasks
+
+1. Right-click a session
+2. Select "📝 Manage Tasks"
+3. Add tasks and check them off as you complete them
+
+### Viewing Statistics
+
+- Click "📊 Statistics" button to see:
+  - Total study hours
+  - Time breakdown by subject
+  - Progress towards your weekly goal
+
+### Keyboard Shortcuts
+
+- `Ctrl+N` - Add new session
+- `Ctrl+E` - Export schedule
+- `Ctrl+S` - Show statistics  
+- `Ctrl+F` - Filter by subject
+- `Ctrl+D` - Toggle dark mode
+- `Ctrl+←/→` - Navigate weeks
+
+## File Structure
+
+```
+study-planner-Comp-Sci-IA/
+├── app.py              # Main application
+├── storage.py          # Session storage (JSON)
+├── time_utils.py       # Time formatting utilities
+├── run_app.py          # Alternative launcher
+├── sessions.json       # Your saved sessions
+└── FEATURE_SHOWCASE.md # Complete feature documentation
 ```
 
-3. To run tests:
+## Tips
 
-```powershell
-& .venv\Scripts\python.exe -m pytest study_planner/tests
+- **Color-code your subjects** (e.g., Blue for Math, Red for English)
+- **Use notes field** for homework details or chapter numbers
+- **Set realistic goals** in the Study Goals menu
+- **Export regularly** to backup your schedule
+
+## Development
+
+### Running Tests
+
+```python
+python -m pytest tests/
 ```
 
-## Running inside Visual Studio Code
+### Project Background
 
-You can run or debug the app directly in VS Code using the supplied launch configurations.
+This was built as a Computer Science IA project to help students organize their study time more effectively. Started with basic scheduling and grew to include all the features I wished commercial planners had.
 
-- If you opened the repository root (C:\workspace) as your workspace:
-	- Open the Run view (Ctrl+Shift+D), then select "Run (module) — repo root workspace" and press the green run button.
+## License
 
-- If you opened the `study_planner` folder as your workspace:
-	- Use "Run (module) — package workspace (cwd = parent)" which runs the module from the parent folder so imports work as expected.
-	- You can also run `app.py` directly with the "Run app.py — package workspace" entry.
+Free to use and modify for personal and educational purposes.
 
-Notes:
-- Make sure VS Code's Python interpreter is set to the project's virtual environment (use Command Palette → Python: Select Interpreter → choose `.venv`).
-- The launch configurations also include a "Run tests (pytest) — package tests" profile to run the tests inside VS Code.
+---
 
+Made with ☕ and lots of late-night coding sessions
 
-## Alternatives
 
 - You can run `python app.py` from inside the `study_planner` folder. The app contains fallback import logic so `app.py` will run as a standalone script, but the package entrypoint is recommended.
 - If you're on macOS or Linux, similar commands work with the POSIX venv activation instead.
