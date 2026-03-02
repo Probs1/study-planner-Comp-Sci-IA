@@ -5,7 +5,9 @@ from typing import List, Dict
 
 
 def default_path() -> Path:
-    return Path(__file__).parent / "sessions.json"
+    """Return path to sessions.json in user's home directory for portable execution."""
+    app_data_dir = Path.home() / ".study_planner"
+    return app_data_dir / "sessions.json"
 
 
 def save_sessions(sessions: List[Dict], path: Path | str | None = None) -> None:

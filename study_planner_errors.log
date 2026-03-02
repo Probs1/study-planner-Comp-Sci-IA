@@ -1,0 +1,9 @@
+[2026-03-01 20:22:57] Invalid session skipped from saved schedule
+Traceback (most recent call last):
+  File "c:\Users\probr\Downloads\Comp sci\study-planner-Comp-Sci-IA\app.py", line 197, in _sanitize_sessions
+    cleaned.append(self._normalize_session(session))
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\probr\Downloads\Comp sci\study-planner-Comp-Sci-IA\app.py", line 149, in _normalize_session
+    raise ValueError("End time must be after start time.")
+ValueError: End time must be after start time.
+

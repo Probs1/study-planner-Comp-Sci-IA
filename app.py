@@ -22,7 +22,9 @@ class StudyPlannerApp:
         self.root.title("Study Planner")
         self.root.configure(bg="#f5f5f5")
         self.root.geometry("1400x900")
-        self.error_log_path = Path(__file__).parent / "study_planner_errors.log"
+        app_data_dir = Path.home() / ".study_planner"
+        app_data_dir.mkdir(parents=True, exist_ok=True)
+        self.error_log_path = app_data_dir / "study_planner_errors.log"
         self.root.report_callback_exception = self._handle_tk_exception
         self.sessions = []
         self.sent_reminders = {}
